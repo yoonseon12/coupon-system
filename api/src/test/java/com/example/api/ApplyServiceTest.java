@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.RedisTemplate;
 
 import com.example.api.repository.CouponRepository;
+import com.example.api.service.ApplyService;
 
 @SpringBootTest
 class ApplyServiceTest {
@@ -104,6 +105,7 @@ class ApplyServiceTest {
 	}
 
 	@Test
+	@DisplayName("Kafka 적용")
 	public void 여러번응모V3() throws InterruptedException {
 		int threadCount = 1000;
 
@@ -130,5 +132,34 @@ class ApplyServiceTest {
 		long count = couponRepository.count();
 
 		assertThat(count).isEqualTo(5);
+	}
+
+	@Test
+	@DisplayName("한 명당 발급 가능한 쿠폰 개수를 1개로 제한한다. -> userId가 1L인 유저가 1000번 쿠폰 발급을 요청해도 1개만 발급된다.")
+	public void 여러번응모V4() throws InterruptedException {
+		int threadCount = 1000;
+
+		//ExecutorService : 병렬 작업을 간단하게 할 수 있게 도와주는 Java API
+		ExecutorService executorService = Executors.newFixedThreadPool(32);
+		// CountDownLatch : 다른 Thread에서 수행하는 작업을 기다리도록 도와주는 클래스
+		CountDownLatch latch = new CountDownLatch(threadCount);
+
+		for (int i=0; i<threadCount; i++) {
+			executorService.submit(() -> {
+				try {
+					applyService.applyV3(1L);
+				} finally {
+					latch.countDown();
+				}
+			});
+		}
+
+		latch.await();
+
+		Thread.sleep(10000); // 데이터가 전송이 완료된 시점을 기준으로 쿠폰의 개수를 가져오고 컨슈머에서는 그 시점에 아직 모든 쿠폰을 생성하지 않았기 때문에 Thread Slip 사용
+
+		long count = couponRepository.count();
+
+		assertThat(count).isEqualTo(1);
 	}
 }
