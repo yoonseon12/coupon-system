@@ -6,10 +6,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.RedisTemplate;
 
 import com.example.api.repository.CouponRepository;
 
@@ -21,6 +23,20 @@ class ApplyServiceTest {
 
 	@Autowired
 	private CouponRepository couponRepository;
+
+	@Autowired
+	private RedisTemplate<String, String> redisTemplate;
+
+	/**
+	 * 만약 멀티스레드 환경에서 여러 스레드가 병렬로 테스트를 실행하는 경우,
+	 * 각 스레드에 대해 별도의 테스트 메서드가 실행되고,
+	 * 각 테스트 메서드 실행이 끝날 때마다 해당 스레드에 대한 @AfterEach 메서드가 호출된다.
+	 */
+	@AfterEach
+	void tearDown() {
+		couponRepository.deleteAll();
+		redisTemplate.delete("coupon_count");
+	}
 
 	@Test
 	public void 한번만응모() {
@@ -59,4 +75,31 @@ class ApplyServiceTest {
 		assertThat(count).isGreaterThan(5); // 레이스 컨디션 발생하여 기대했던 5보다 큰 값으로 설정된다.
 	}
 
+	@Test
+	@DisplayName("멀티스레드 환경에서 쿠폰 발급을 진행 : 레디스 increment 적용 -> 레디스는 싱글스레드 기반으로 동작하기 때문에 레이스 컨디션이 발생하지 않는다")
+	public void 여러번응모V2() throws InterruptedException {
+		int threadCount = 10;
+
+		//ExecutorService : 병렬 작업을 간단하게 할 수 있게 도와주는 Java API
+		ExecutorService executorService = Executors.newFixedThreadPool(32);
+		// CountDownLatch : 다른 Thread에서 수행하는 작업을 기다리도록 도와주는 클래스
+		CountDownLatch latch = new CountDownLatch(threadCount);
+
+		for (int i=0; i<threadCount; i++) {
+			long userId = i;
+			executorService.submit(() -> {
+				try {
+					applyService.applyV2(userId);
+				} finally {
+					latch.countDown();
+				}
+			});
+		}
+
+		latch.await();
+
+		long count = couponRepository.count();
+
+		assertThat(count).isEqualTo(5);
+	}
 }
