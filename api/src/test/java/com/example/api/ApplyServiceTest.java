@@ -102,4 +102,33 @@ class ApplyServiceTest {
 
 		assertThat(count).isEqualTo(5);
 	}
+
+	@Test
+	public void 여러번응모V3() throws InterruptedException {
+		int threadCount = 1000;
+
+		//ExecutorService : 병렬 작업을 간단하게 할 수 있게 도와주는 Java API
+		ExecutorService executorService = Executors.newFixedThreadPool(32);
+		// CountDownLatch : 다른 Thread에서 수행하는 작업을 기다리도록 도와주는 클래스
+		CountDownLatch latch = new CountDownLatch(threadCount);
+
+		for (int i=0; i<threadCount; i++) {
+			long userId = i;
+			executorService.submit(() -> {
+				try {
+					applyService.applyV3(userId);
+				} finally {
+					latch.countDown();
+				}
+			});
+		}
+
+		latch.await();
+
+		Thread.sleep(10000); // 데이터가 전송이 완료된 시점을 기준으로 쿠폰의 개수를 가져오고 컨슈머에서는 그 시점에 아직 모든 쿠폰을 생성하지 않았기 때문에 Thread Slip 사용
+
+		long count = couponRepository.count();
+
+		assertThat(count).isEqualTo(5);
+	}
 }
